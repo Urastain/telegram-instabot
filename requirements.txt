@@ -1,4 +1,3 @@
-python-telegram-bot[webhooks]==20.7
-Flask
-requests
-instaloader
+python-telegram-bot==20.7
+instaloader==4.14.1
+requests==2.32.3
