@@ -57,11 +57,6 @@ async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TY
 
     logger.info(f"Получена ссылка: {message.text}")
 
-    try:
-        await chat.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
-    except Exception as e:
-        logger.warning(f"Не удалось удалить сообщение: {e}")
-
     shortcode = message.text.split("/")[-2]
     downloader = InstagramDownloader()
     temp_file, error = await asyncio.get_event_loop().run_in_executor(None, downloader.download_video, shortcode)
@@ -71,6 +66,13 @@ async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     try:
+        # Удаляем исходное сообщение
+        await chat.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    try:
+        # Отправляем видео
         with open(temp_file, "rb") as video:
             await chat.send_video(video=video, supports_streaming=True)
     except Exception as e:
@@ -79,19 +81,25 @@ async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TY
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
-# Функция запуска бота с перезапуском
+# Функция запуска бота
+async def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(MessageHandler(filters.Regex(INSTAGRAM_REGEX), handle_instagram_link))
+    logger.info("🤖 Бот запущен")
+    await app.run_polling()
+
+# Бесконечный цикл с перезапуском
 def run_bot():
+    loop = asyncio.new_event_loop()
     while True:
         try:
-            loop = asyncio.new_event_loop()
-            app = Application.builder().token(TOKEN).build()
-            app.add_handler(MessageHandler(filters.Regex(INSTAGRAM_REGEX), handle_instagram_link))
-            logger.info("🤖 Бот запущен")
-            loop.run_until_complete(app.run_polling())
+            loop.run_until_complete(main())
         except Exception as e:
             logger.error(f"Ошибка работы бота: {e}")
             logger.info("Перезапуск бота через 10 секунд...")
-            asyncio.sleep(10)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(asyncio.sleep(10))
 
 if __name__ == "__main__":
     run_bot()
