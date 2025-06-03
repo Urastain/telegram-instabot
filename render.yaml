@@ -10,3 +10,4 @@ services:
       - key: APP_URL
         sync: false
     plan: free
+    PORT=10000
