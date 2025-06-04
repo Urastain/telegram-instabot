@@ -2,8 +2,7 @@ import os
 import requests
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import Application, Dispatcher, MessageHandler, filters
-from telegram.ext import ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import instaloader
 import asyncio
 import logging
@@ -19,12 +18,17 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
+# Создаём приложение Telegram
+application = Application.builder().token(TOKEN).build()
+
+# Функция отправки видео
 def send_video(chat_id, video_url):
     requests.post(f"{API_URL}/sendVideo", data={
         "chat_id": chat_id,
         "video": video_url
     })
 
+# Получение видео из Instagram через RapidAPI
 def get_instagram_video(insta_url):
     url = "https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index"
     headers = {
@@ -34,6 +38,7 @@ def get_instagram_video(insta_url):
     response = requests.get(url, headers=headers, params={"url": insta_url})
     return response.json().get("media")
 
+# Обработчик сообщений
 async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     chat = update.effective_chat
@@ -46,32 +51,32 @@ async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if video_url:
         send_video(chat.id, video_url)
     else:
-        requests.post(f"{API_URL}/sendMessage", data={
-            "chat_id": chat.id,
-            "text": "Не удалось получить видео. Попробуй другую ссылку."
-        })
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text="Не удалось получить видео. Попробуй другую ссылку."
+        )
 
+# Webhook endpoint
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot)
-    asyncio.run(dispatcher.process_update(update))
+    asyncio.run(application.process_update(update))
     return "OK"
 
+# Тестовый GET-эндпоинт
 @app.route("/", methods=["GET"])
 def index():
     return "Bot is running!"
 
 if __name__ == "__main__":
-    application = Application.builder().token(TOKEN).build()
-    dispatcher = application.dispatcher
-    dispatcher.add_handler(MessageHandler(filters.TEXT, handle_instagram))
+    # Регистрируем обработчик сообщений
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram))
 
     # Устанавливаем webhook
-    # APP_URL задаётся в Environment → BOT_URL (см. ниже)
-    BOT_URL = os.environ.get("BOT_URL")  # например: https://<your-app>.onrender.com
+    BOT_URL = os.environ.get("BOT_URL")  # например: https://your-app.onrender.com
     bot.set_webhook(f"{BOT_URL}/{TOKEN}")
 
-    # Привязываемся к порту из Render
+    # Flask-сервер
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
