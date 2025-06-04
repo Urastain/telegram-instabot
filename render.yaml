@@ -3,7 +3,12 @@ services:
     name: insta-telegram-bot
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    startCommand: "python bot.py"
     envVars:
-      - key: TELEGRAM_TOKEN
+      - key: BOT_TOKEN
         sync: false
+      - key: RAPIDAPI_KEY
+        sync: false
+      - key: BOT_URL
+        sync: false
+    plan: free
