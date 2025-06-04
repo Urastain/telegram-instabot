@@ -74,8 +74,11 @@ if __name__ == "__main__":
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram))
 
     # Устанавливаем webhook
-    BOT_URL = os.environ.get("BOT_URL")  # например: https://your-app.onrender.com
-    bot.set_webhook(f"{BOT_URL}/{TOKEN}")
+    import asyncio
+
+bot = Bot(token=TOKEN)
+asyncio.run(bot.set_webhook(f"{BOT_URL}/{TOKEN}"))
+
 
     # Flask-сервер
     port = int(os.environ.get("PORT", 5000))
