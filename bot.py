@@ -11,7 +11,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = os.environ.get("BOT_TOKEN")
+TOKEN = os.environ.get("B7842612175:AAEldaiQtK7YSldUhxx4qVuiIF7jfwTLy10")
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY")
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
