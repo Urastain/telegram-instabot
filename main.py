@@ -1,83 +1,98 @@
 import os
+import re
 import logging
 import asyncio
-import requests
-
+import instaloader
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-# --- Логирование ---
+# --- Настройка логирования ---
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 # --- Переменные окружения ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+TOKEN = os.getenv("BOT_TOKEN")
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN is not set in environment variables")
-if not RAPIDAPI_KEY:
-    raise ValueError("RAPIDAPI_KEY is not set in environment variables")
+# --- Регулярное выражение для Instagram ---
+INSTAGRAM_REGEX = r"https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[A-Za-z0-9_-]+/?(\?.*)?"
 
-# --- Получение прямой ссылки на видео через RapidAPI ---
-def get_instagram_video(insta_url: str) -> str | None:
-    api_endpoint = "https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index" 
-    headers = {
-        "X-RapidAPI-Key": RAPIDAPI_KEY,
-        "X-RapidAPI-Host": "instagram-downloader-download-instagram-videos-stories.p.rapidapi.com"
-    }
+# --- Класс загрузки видео ---
+class InstagramDownloader:
+    def __init__(self):
+        self.L = instaloader.Instaloader(download_pictures=False, quiet=True)
 
-    try:
-        response = requests.get(api_endpoint, headers=headers, params={"url": insta_url})
-        response.raise_for_status()
-        data = response.json()
-        return data.get("media")
-    except Exception as e:
-        logger.error(f"Не удалось получить видео: {e}")
-        return None
+    async def download_video(self, shortcode):
+        try:
+            post = instaloader.Post.from_shortcode(self.L.context, shortcode)
+            if not post.is_video:
+                return None, "❌ Это не видео."
+
+            video_url = post.video_url
+            response = await asyncio.get_event_loop().run_in_executor(None, requests.get, video_url)
+            content_length = int(response.headers.get('Content-Length', 0))
+            if content_length > MAX_FILE_SIZE:
+                return None, "❌ Видео слишком большое (>50MB)."
+
+            temp_file = f"{shortcode}.mp4"
+            with open(temp_file, "wb") as f:
+                for chunk in response.iter_content(8192):
+                    if chunk:
+                        f.write(chunk)
+            return temp_file, None
+        except Exception as e:
+            logger.error(f"Ошибка загрузки: {e}")
+            return None, f"❌ Ошибка загрузки: {str(e)}"
 
 # --- Обработчик сообщений ---
 async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message_text = update.effective_message.text or ""
-    chat_id = update.effective_chat.id
+    message = update.effective_message
+    chat = update.effective_chat
 
-    if "instagram.com" not in message_text:
+    if not re.search(INSTAGRAM_REGEX, message.text):
         return
 
-    logger.info(f"Обнаружена ссылка: {message_text}")
+    logger.info(f"Получена ссылка: {message.text}")
+
+    shortcode = message.text.split("/")[-2]
+    downloader = InstagramDownloader()
+    temp_file, error = await downloader.download_video(shortcode)
+
+    if error:
+        logger.error(error)
+        await message.reply_text(error)
+        return
 
     try:
-        # Удаляем исходное сообщение
-        await context.bot.delete_message(chat_id=chat_id, message_id=update.effective_message.message_id)
+        await chat.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
     except Exception as e:
         logger.warning(f"Не удалось удалить сообщение: {e}")
 
-    # Получаем прямую ссылку на видео
-    video_url = get_instagram_video(message_text)
-    if video_url:
-        try:
-            # Отправляем видео
-            await context.bot.send_video(chat_id=chat_id, video=video_url, supports_streaming=True)
-        except Exception as e:
-            logger.error(f"Ошибка при отправке видео: {e}")
-    else:
-        await context.bot.send_message(chat_id=chat_id, text="❌ Не удалось скачать видео. Попробуйте другую ссылку.")
+    try:
+        with open(temp_file, "rb") as video:
+            await chat.send_video(video=video, supports_streaming=True)
+    except Exception as e:
+        logger.error(f"Ошибка отправки видео: {e}")
+        await message.reply_text("❌ Ошибка отправки видео.")
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
 
 # --- Основной запуск бота ---
 async def main():
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram))
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(MessageHandler(filters.Regex(INSTAGRAM_REGEX), handle_instagram))
     logger.info("🤖 Бот запущен")
-    await application.run_polling()
+    await app.run_polling()
 
 # --- Бесконечный перезапуск бота ---
 def run_bot():
-    loop = asyncio.get_event_loop()
     while True:
         try:
+            loop = asyncio.new_event_loop()
             loop.run_until_complete(main())
         except Exception as e:
             logger.error(f"Ошибка работы бота: {e}")
