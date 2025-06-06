@@ -3,8 +3,7 @@ import logging
 import asyncio
 import requests
 
-from flask import Flask, request
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 # --- Логирование ---
@@ -15,28 +14,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Переменные окружения ---
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-BOT_URL = os.getenv("BOT_URL")
 
-if not TOKEN:
+if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is not set in environment variables")
 if not RAPIDAPI_KEY:
     raise ValueError("RAPIDAPI_KEY is not set in environment variables")
-if not BOT_URL:
-    raise ValueError("BOT_URL is not set in environment variables")
-
-# --- Инициализация объектов ---
-bot = Bot(token=TOKEN)
-app = Flask(__name__)
-application = Application.builder().token(TOKEN).build()
-
 
 # --- Функция отправки видео в Telegram ---
 def send_video(chat_id: int, video_url: str) -> None:
     try:
         response = requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendVideo",
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo", 
             data={"chat_id": chat_id, "video": video_url}
         )
         response.raise_for_status()
@@ -44,10 +34,9 @@ def send_video(chat_id: int, video_url: str) -> None:
     except Exception as e:
         logger.error(f"Ошибка при отправке видео: {e}")
 
-
 # --- Получение прямой ссылки на видео через RapidAPI ---
 def get_instagram_video(insta_url: str) -> str | None:
-    api_endpoint = "https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index"
+    api_endpoint = "https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index" 
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
         "X-RapidAPI-Host": "instagram-downloader-download-instagram-videos-stories.p.rapidapi.com"
@@ -61,7 +50,6 @@ def get_instagram_video(insta_url: str) -> str | None:
     except Exception as e:
         logger.error(f"Не удалось получить видео: {e}")
         return None
-
 
 # --- Обработчик входящих сообщений ---
 async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,34 +66,24 @@ async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
         send_video(chat_id, video_url)
         await context.bot.delete_message(chat_id=chat_id, message_id=update.effective_message.message_id)
     else:
-        await context.bot.send_message(chat_id=chat_id, text="Не удалось получить видео. Попробуй другую ссылку.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ Не удалось получить видео. Попробуйте другую ссылку.")
 
-
-# --- Webhook для Telegram ---
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update_data = request.get_json(force=True)
-    update = Update.de_json(update_data, bot)
-    asyncio.run(application.process_update(update))
-    return "OK", 200
-
-
-# --- Проверка статуса приложения ---
-@app.route("/", methods=["GET"])
-def index():
-    return "Instagram Downloader Bot is running!", 200
-
-
-# --- Точка входа ---
-if __name__ == "__main__":
-    # Регистрация обработчиков
+# --- Основной запуск бота ---
+async def main():
+    application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_instagram))
+    logger.info("🤖 Бот запущен")
+    await application.run_polling()
 
-    # Установка Webhook
-    logger.info("Установка Webhook...")
-    asyncio.run(bot.set_webhook(f"{BOT_URL}/{TOKEN}"))
+# --- Бесконечный перезапуск бота ---
+def run_bot():
+    while True:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            logger.error(f"Ошибка работы бота: {e}")
+            logger.info("Перезапуск бота через 10 секунд...")
+            time.sleep(10)
 
-    # Запуск Flask-сервера
-    port = int(os.environ.get("PORT", 5000))
-    logger.info(f"Сервер запущен на порту {port}")
-    app.run(host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    run_bot()
