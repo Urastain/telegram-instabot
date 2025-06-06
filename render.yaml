@@ -1,13 +1,7 @@
-services:
-  - type: web
-    name: instagram-downloader-bot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    envVars:
-      - key: 7842612175:AAEldaiQtK7YSldUhxx4qVuiIF7jfwTLy10
-        value: your-token
-      - key: RAPIDAPI_KEY
-        value: your-rapidapi-key
-      - key: BOT_URL
-        value: https://your-app-name.onrender.com
+envVars:
+  - key: BOT_TOKEN
+    value: 7842612175:AAEldaiQtK7YSldUhxx4qVuiIF7jfwTLy10
+  - key: RAPIDAPI_KEY
+    value: your-actual-rapidapi-key
+  - key: BOT_URL
+    value: https://your-app-name.onrender.com
