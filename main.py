@@ -1,15 +1,16 @@
 import os
-import re
 import logging
 import asyncio
-import instaloader
+import requests
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+import instaloader
+import time  # ✅ Добавлен импорт
 
-# --- Настройка логирования ---
+# --- Логирование ---
 logging.basicConfig(
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,12 @@ class InstagramDownloader:
                 return None, "❌ Это не видео."
 
             video_url = post.video_url
-            response = await asyncio.get_event_loop().run_in_executor(None, requests.get, video_url)
+            response = requests.get(video_url, stream=True, timeout=30)
+            response.raise_for_status()
+
             content_length = int(response.headers.get('Content-Length', 0))
             if content_length > MAX_FILE_SIZE:
-                return None, "❌ Видео слишком большое (>50MB)."
+                return None, "❌ Видео слишком большое (>50MB)"
 
             temp_file = f"{shortcode}.mp4"
             with open(temp_file, "wb") as f:
@@ -59,24 +62,24 @@ async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     shortcode = message.text.split("/")[-2]
     downloader = InstagramDownloader()
-    temp_file, error = await downloader.download_video(shortcode)
+    temp_file, error = await asyncio.get_event_loop().run_in_executor(None, downloader.download_video, shortcode)
 
     if error:
         logger.error(error)
-        await message.reply_text(error)
         return
 
     try:
-        await chat.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
+        # Удаляем исходное сообщение
+        await context.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
     except Exception as e:
         logger.warning(f"Не удалось удалить сообщение: {e}")
 
     try:
+        # Отправляем видео
         with open(temp_file, "rb") as video:
             await chat.send_video(video=video, supports_streaming=True)
     except Exception as e:
-        logger.error(f"Ошибка отправки видео: {e}")
-        await message.reply_text("❌ Ошибка отправки видео.")
+        logger.error(f"Ошибка отправки: {e}")
     finally:
         if os.path.exists(temp_file):
             os.remove(temp_file)
@@ -90,14 +93,14 @@ async def main():
 
 # --- Бесконечный перезапуск бота ---
 def run_bot():
+    loop = asyncio.new_event_loop()
     while True:
         try:
-            loop = asyncio.new_event_loop()
             loop.run_until_complete(main())
         except Exception as e:
             logger.error(f"Ошибка работы бота: {e}")
             logger.info("Перезапуск бота через 10 секунд...")
-            loop.run_until_complete(asyncio.sleep(10))
+            time.sleep(10)
 
 if __name__ == "__main__":
     run_bot()
