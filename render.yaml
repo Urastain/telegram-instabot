@@ -1,14 +1,13 @@
 services:
   - type: web
-    name: insta-telegram-bot
-    runtime: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot.py"
+    name: instagram-downloader-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
-        sync: false
+        value: your-token
       - key: RAPIDAPI_KEY
-        sync: false
+        value: your-rapidapi-key
       - key: BOT_URL
-        sync: false
-    plan: free
+        value: https://your-app-name.onrender.com
