@@ -17,7 +17,7 @@ if not TOKEN:
     raise ValueError("BOT_TOKEN is not set in environment variables")
 
 # --- Обработчик сообщений ---
-async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     chat = update.effective_chat
     logger.info(f"Получено сообщение: {message.text}")
@@ -26,28 +26,20 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Основной запуск бота ---
 async def main():
     app = Application.builder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.ALL, handle_messages))
+    app.add_handler(MessageHandler(filters.ALL, handle_message))
     logger.info("🤖 Бот запущен")
-    
-    try:
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
-        await app.stop()
-    except Exception as e:
-        logger.error(f"Ошибка работы бота: {e}")
-        await app.shutdown()
+    await app.run_polling()
 
 # --- Бесконечный перезапуск бота ---
 def run_bot():
-    loop = asyncio.get_event_loop()
-    while True:
-        try:
-            loop.run_until_complete(main())
-        except Exception as e:
-            logger.error(f"Ошибка запуска: {e}")
-        finally:
-            loop.run_until_complete(asyncio.sleep(10))
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except Exception as e:
+        logger.error(f"Ошибка работы бота: {e}")
+        logger.info("Перезапуск бота через 15 секунд...")
+        time.sleep(15)  # Добавлен импорт time
+        run_bot()
 
 if __name__ == "__main__":
     run_bot()
