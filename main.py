@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import requests
+import time  # ✅ Добавлен импорт time
 
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -61,10 +62,16 @@ async def handle_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Обработка ссылки: {message_text}")
 
+    try:
+        # Удаляем исходное сообщение
+        await context.bot.delete_message(chat_id=chat_id, message_id=update.effective_message.message_id)
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    # Получаем прямую ссылку на видео
     video_url = get_instagram_video(message_text)
     if video_url:
         send_video(chat_id, video_url)
-        await context.bot.delete_message(chat_id=chat_id, message_id=update.effective_message.message_id)
     else:
         await context.bot.send_message(chat_id=chat_id, text="❌ Не удалось получить видео. Попробуйте другую ссылку.")
 
@@ -79,11 +86,14 @@ async def main():
 def run_bot():
     while True:
         try:
-            asyncio.run(main())
+            # Создаем новый цикл событий
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(main())
         except Exception as e:
             logger.error(f"Ошибка работы бота: {e}")
             logger.info("Перезапуск бота через 10 секунд...")
-            time.sleep(10)
+            time.sleep(10)  # ✅ Теперь работает без ошибок
 
 if __name__ == "__main__":
     run_bot()
