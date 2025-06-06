@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-import time  # ✅ Убедитесь, что импортирован
+import time  # ✅ Добавлен импорт
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -17,24 +17,42 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN is not set in environment variables")
 
+# --- Регулярное выражение для Instagram ---
+INSTAGRAM_REGEX = r"https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[A-Za-z0-9_-]+/?(\?.*)?"
+
 # --- Обработчик сообщений ---
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Получено сообщение: {update.effective_message.text}")
-    await update.effective_chat.send_message("Вы написали: " + update.effective_message.text)
+    message = update.effective_message
+    chat = update.effective_chat
+    
+    if not re.search(INSTAGRAM_REGEX, message.text):
+        return
+    
+    logger.info(f"Получена ссылка: {message.text}")
+    
+    try:
+        # Удаляем исходное сообщение
+        await chat.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+    
+    # Здесь добавьте логику загрузки и отправки видео (см. предыдущие примеры)
 
 # --- Основной запуск бота ---
 async def main():
     app = Application.builder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.ALL, handle_messages))
+    app.add_handler(MessageHandler(filters.Regex(INSTAGRAM_REGEX), handle_messages))
     logger.info("🤖 Бот запущен")
-    await app.run_polling()  # ✅ Используем корректный метод
+    await app.run_polling()
 
 # --- Бесконечный перезапуск бота ---
 def run_bot():
     while True:
         try:
-            # Используем asyncio.run() вместо вручную созданного цикла
-            asyncio.run(main())
+            # Создаем новый цикл событий
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(main())
         except Exception as e:
             logger.error(f"Ошибка работы бота: {e}")
             logger.info("Перезапуск бота через 10 секунд...")
