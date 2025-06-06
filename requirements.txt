@@ -1,3 +1,4 @@
 python-telegram-bot==20.8
 instaloader==4.14.1
 requests==2.32.3
+httpx==0.26.0  # Добавлено для совместимости с python-telegram-bot==20.8
