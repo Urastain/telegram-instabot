@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import time  # ✅ Добавлен импорт
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -30,9 +31,14 @@ async def main():
 def run_bot():
     while True:
         try:
-            asyncio.run(main())
+            # Создаем новый цикл событий
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Запускаем бота
+            loop.run_until_complete(main())
         except Exception as e:
-            logger.error(f"Ошибка работы бота: {e}")
+            logger.error(f"Ошибка работы бота: {str(e)}")
             logger.info("Перезапуск через 10 секунд...")
             time.sleep(10)
 
