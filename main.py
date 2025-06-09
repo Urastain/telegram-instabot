@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-import time  # ✅ Добавлен импорт
+import time
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
@@ -10,8 +10,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Переменные окружения ---
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is not set in environment variables")
 
 # --- Обработчик сообщений ---
@@ -22,12 +22,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Основной запуск бота ---
 async def main():
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     logger.info("🤖 Бот запущен")
     await app.run_polling()
 
-# --- Бесконечный перезапуск бота ---
+# --- Бесконечный цикл с перезапуском ---
 def run_bot():
     while True:
         try:
