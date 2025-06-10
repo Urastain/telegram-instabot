@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 import requests
+import asyncio
 
 from flask import Flask
 from telegram import Update
@@ -13,6 +14,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+import yt_dlp
 
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
@@ -27,9 +29,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Отправь ссылку на Instagram-видео.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message.text
+    message = update.message.text.strip()
     if "instagram.com" in message:
-        await update.message.reply_text("Обработка ссылки… (скачивание пока не реализовано)")
+        await update.message.reply_text("Скачиваю видео…")
+        try:
+            filename = f"video_{update.message.message_id}.mp4"
+            ydl_opts = {
+                'outtmpl': filename,
+                'format': 'mp4',
+                'quiet': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([message])
+            # Отправить видео пользователю
+            with open(filename, "rb") as video:
+                await update.message.reply_video(video)
+            os.remove(filename)
+        except Exception as e:
+            logger.error(f"Ошибка скачивания: {e}")
+            await update.message.reply_text(f"Ошибка скачивания: {e}")
     else:
         await update.message.reply_text("Пожалуйста, отправь ссылку на Instagram.")
 
@@ -55,11 +73,8 @@ if __name__ == "__main__":
         threading.Thread(target=keep_alive, daemon=True).start()
 
     # Telegram polling — в главном потоке!
-    from telegram.ext import Application
-    import asyncio
-
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logging.info("Telegram приложение инициализировано")
+    logger.info("Telegram приложение инициализировано")
     asyncio.run(application.run_polling())
