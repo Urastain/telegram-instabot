@@ -154,8 +154,11 @@ def webhook():
         json_data = request.get_json(force=True)
         update = Update.de_json(json_data, telegram_app.bot)
         
-        # Создаем задачу для обработки обновления
-        asyncio.create_task(telegram_app.process_update(update))
+        # Запускаем обработку в отдельном потоке
+        def process_update():
+            asyncio.run(telegram_app.process_update(update))
+        
+        threading.Thread(target=process_update, daemon=True).start()
         
         return "OK", 200
     except Exception as e:
