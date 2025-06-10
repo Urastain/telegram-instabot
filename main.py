@@ -1,115 +1,85 @@
 import os
-import re
+import asyncio
 import logging
-import requests
-import threading
-import time
 
-from flask import Flask
+from flask import Flask, request
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
+import httpx
 
-# Настройка логирования
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+# Настройка логов
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Токен бота (лучше хранить в переменных окружения!)
-TOKEN = os.getenv("BOT_TOKEN", "ВАШ_ТОКЕН_ЗДЕСЬ")
+# Получение переменных из окружения
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = f"https://telegram-instabot-vhl4.onrender.com/{TOKEN}"
 
-# Регулярное выражение для ссылок Instagram
-INSTAGRAM_REGEX = r"https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[A-Za-z0-9_-]+/?(\?.*)?"
-
-# Flask для keep-alive (Render)
+# Flask-приложение
 app = Flask(__name__)
 
-@app.route('/')
-def index():
-    return 'OK', 200
+# Создаем Telegram-приложение
+application = Application.builder().token(TOKEN).build()
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
 
-def keep_alive():
-    url = os.environ.get("RENDER_EXTERNAL_URL")
-    if not url:
-        return
-    while True:
-        try:
-            requests.get(url)
-        except Exception as e:
-            logger.warning(f"Keep-alive failed: {e}")
-        time.sleep(300)
+# Команды бота
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Отправь ссылку на Instagram-видео.")
 
-async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-    chat = update.effective_chat
 
-    if not re.search(INSTAGRAM_REGEX, message.text):
-        return
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message.text
+    if "instagram.com" in message:
+        await update.message.reply_text("Обработка ссылки… (пока не реализовано)")
+    else:
+        await update.message.reply_text("Пожалуйста, отправь ссылку на Instagram.")
 
-    logger.info(f"Получена ссылка: {message.text}")
 
-    shortcode = message.text.split("/")[-2]
-    temp_file = f"{shortcode}.mp4"
-
+# Обработка запроса от Telegram (вебхук)
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
     try:
-        import instaloader
-        L = instaloader.Instaloader(download_pictures=False, quiet=True)
-        post = instaloader.Post.from_shortcode(L.context, shortcode)
-
-        if not post.is_video:
-            logger.warning("Пост не является видео")
-            await chat.send_message("Это не видеопост или видео недоступно.")
-            return
-
-        video_url = post.video_url
-        response = requests.get(video_url, stream=True, timeout=30)
-        response.raise_for_status()
-
-        content_length = int(response.headers.get('Content-Length', 0))
-        if content_length > 50 * 1024 * 1024:
-            logger.warning("Видео слишком большое")
-            await chat.send_message("Видео слишком большое (>50MB) для отправки.")
-            return
-
-        with open(temp_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-
-        with open(temp_file, 'rb') as video_file:
-            await chat.send_video(video=video_file,
-                                  caption="📥 Видео из Instagram",
-                                  supports_streaming=True)
-
-        try:
-            await context.bot.delete_message(chat_id=chat.id, message_id=message.message_id)
-            logger.info("Сообщение успешно удалено")
-        except Exception as e:
-            logger.error(f"Не удалось удалить сообщение: {e}")
-
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        asyncio.create_task(application.update_queue.put(update))
+        return "OK", 200
     except Exception as e:
-        logger.error(f"Ошибка обработки видео: {e}")
-        await chat.send_message(f"Ошибка обработки: {e}")
+        logger.error(f"Webhook error: {e}")
+        return "ERROR", 500
 
-    finally:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
 
-def main():
-    threading.Thread(target=run_flask, daemon=True).start()
-    threading.Thread(target=keep_alive, daemon=True).start()
+async def set_webhook():
+    async with httpx.AsyncClient() as client:
+        url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
+        response = await client.post(url, data={"url": WEBHOOK_URL})
+        if response.status_code == 200:
+            logger.info(f"Вебхук установлен: {WEBHOOK_URL}")
+        else:
+            logger.error(f"Ошибка установки вебхука: {response.text}")
 
-    app_tg = ApplicationBuilder().token(TOKEN).build()
-    app_tg.add_handler(
-        MessageHandler(filters.TEXT & filters.Regex(INSTAGRAM_REGEX),
-                       handle_instagram_link)
-    )
 
-    logger.info("🤖 Бот запущен")
-    app_tg.run_polling()
+async def main():
+    # Регистрируем хендлеры
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # Устанавливаем вебхук
+    await application.initialize()
+    await set_webhook()
+    logger.info("Telegram приложение инициализировано")
+
+
+# Запускаем все
 if __name__ == "__main__":
-    main()
+    import threading
+
+    # Запуск Telegram-бота в фоновом потоке
+    threading.Thread(target=lambda: asyncio.run(main())).start()
+
+    # Запуск Flask-сервера
+    app.run(host="0.0.0.0", port=10000)
