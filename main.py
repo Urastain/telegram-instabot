@@ -27,11 +27,9 @@ app = Flask(__name__)
 # Создаем Telegram-приложение
 application = Application.builder().token(TOKEN).build()
 
-
 # Команды бота
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Отправь ссылку на Instagram-видео.")
-
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message.text
@@ -40,18 +38,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Пожалуйста, отправь ссылку на Instagram.")
 
-
 # Обработка запроса от Telegram (вебхук)
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     try:
         update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.create_task(application.update_queue.put(update))
+        # Исправлено: обрабатываем update в event loop
+        asyncio.run(application.process_update(update))
         return "OK", 200
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return "ERROR", 500
-
 
 async def set_webhook():
     async with httpx.AsyncClient() as client:
@@ -62,7 +59,6 @@ async def set_webhook():
         else:
             logger.error(f"Ошибка установки вебхука: {response.text}")
 
-
 async def main():
     # Регистрируем хендлеры
     application.add_handler(CommandHandler("start", start))
@@ -72,7 +68,6 @@ async def main():
     await application.initialize()
     await set_webhook()
     logger.info("Telegram приложение инициализировано")
-
 
 # Запускаем все
 if __name__ == "__main__":
