@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 import requests
-import asyncio
 
 from flask import Flask
 from telegram import Update
@@ -14,7 +13,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-import yt_dlp
+import instaloader
 
 TOKEN = os.getenv("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
@@ -26,30 +25,41 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Отправь ссылку на Instagram-видео.")
+    await update.message.reply_text("Привет! Отправь ссылку на Instagram-пост, и я попробую скачать видео без авторизации.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message.text.strip()
     if "instagram.com" in message:
-        await update.message.reply_text("Скачиваю видео…")
+        await update.message.reply_text("Пробую скачать видео через instaloader…")
         try:
-            filename = f"video_{update.message.message_id}.mp4"
-            ydl_opts = {
-                'outtmpl': filename,
-                'format': 'mp4',
-                'quiet': True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([message])
-            # Отправить видео пользователю
-            with open(filename, "rb") as video:
-                await update.message.reply_video(video)
-            os.remove(filename)
+            loader = instaloader.Instaloader(dirname_pattern=".", save_metadata=False, download_comments=False, download_video_thumbnails=False)
+            shortcode = None
+            # Попробуем вытащить shortcode из ссылки
+            import re
+            m = re.search(r"instagram\.com/(?:reel|p|tv)/([A-Za-z0-9_-]{5,})", message)
+            if m:
+                shortcode = m.group(1)
+            else:
+                await update.message.reply_text("Не удалось определить идентификатор видео.")
+                return
+            
+            post = instaloader.Post.from_shortcode(loader.context, shortcode)
+            if post.is_video:
+                video_url = post.video_url
+                filename = f"video_{update.message.message_id}.mp4"
+                resp = requests.get(video_url)
+                with open(filename, "wb") as f:
+                    f.write(resp.content)
+                with open(filename, "rb") as video:
+                    await update.message.reply_video(video)
+                os.remove(filename)
+            else:
+                await update.message.reply_text("Это не видео-пост или видео недоступно.")
         except Exception as e:
             logger.error(f"Ошибка скачивания: {e}")
             await update.message.reply_text(f"Ошибка скачивания: {e}")
     else:
-        await update.message.reply_text("Пожалуйста, отправь ссылку на Instagram.")
+        await update.message.reply_text("Пожалуйста, отправь ссылку на пост Instagram.")
 
 @app.route("/")
 def index():
@@ -67,14 +77,13 @@ def keep_alive():
         time.sleep(300)  # 5 минут
 
 if __name__ == "__main__":
-    # Запуск Flask и keep_alive в отдельных потоках
     threading.Thread(target=run_flask, daemon=True).start()
     if APP_URL != "http://localhost:10000":
         threading.Thread(target=keep_alive, daemon=True).start()
 
-    # Telegram polling — в главном потоке!
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Telegram приложение инициализировано")
+    import asyncio
     asyncio.run(application.run_polling())
