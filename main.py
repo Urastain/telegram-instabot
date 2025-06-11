@@ -1,239 +1,68 @@
 import os
-import asyncio
 import logging
-import tempfile
-import threading
-import time
-from flask import Flask, request, jsonify
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
-import httpx
-import yt_dlp
-from urllib.parse import urlparse
+from flask import Flask, request
+from telegram import Bot, Update
+from telegram.constants import ParseMode
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from utils import download_instagram_video
+import asyncio
+from dotenv import load_dotenv
 
-# Настройка логов
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+load_dotenv()
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_PATH = f"/{TOKEN}"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получение переменных из окружения
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("BOT_TOKEN не найден в переменных окружения")
-
-WEBHOOK_URL = f"https://telegram-instabot-vhl4.onrender.com/{TOKEN}"
-PORT = int(os.getenv("PORT", 10000))
-
-# Flask-приложение
 app = Flask(__name__)
+bot = Bot(token=TOKEN)
+application = Application.builder().token(TOKEN).build()
 
-# Глобальная переменная для приложения
-telegram_app = None
+# Команда /start
+async def start(update: Update, context):
+    await update.message.reply_text("Отправь мне ссылку на Instagram-видео, и я загружу его для тебя.")
 
-class InstagramDownloader:
-    def __init__(self):
-        self.ydl_opts = {
-            'format': 'best[ext=mp4]/best',
-            'outtmpl': '%(title)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
-        }
-    
-    def download_video(self, url):
-        """Скачивает видео с Instagram и возвращает путь к файлу"""
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                self.ydl_opts['outtmpl'] = os.path.join(temp_dir, '%(title)s.%(ext)s')
-                
-                with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-                    # Получаем информацию о видео
-                    info = ydl.extract_info(url, download=False)
-                    title = info.get('title', 'instagram_video')
-                    
-                    # Скачиваем видео
-                    ydl.download([url])
-                    
-                    # Находим скачанный файл
-                    for file in os.listdir(temp_dir):
-                        if file.endswith(('.mp4', '.mkv', '.webm')):
-                            file_path = os.path.join(temp_dir, file)
-                            # Читаем файл в память
-                            with open(file_path, 'rb') as f:
-                                return f.read(), title
-            
-            return None, None
-        except Exception as e:
-            logger.error(f"Ошибка при скачивании видео: {e}")
-            return None, None
+# Обработка ссылок
+async def handle_message(update: Update, context):
+    url = update.message.text
+    chat_id = update.effective_chat.id
+    msg = await context.bot.send_message(chat_id=chat_id, text="🔄 Загружаю видео...")
 
-downloader = InstagramDownloader()
-
-# Команды бота
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🎬 Привет! Я бот для скачивания видео с Instagram.\n\n"
-        "📋 Как использовать:\n"
-        "• Отправь мне ссылку на Instagram пост/reel\n"
-        "• Жди, пока я скачаю видео\n"
-        "• Получи файл!\n\n"
-        "⚠️ Поддерживаются только публичные посты"
-    )
-    await update.message.reply_text(welcome_text)
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message.text.strip()
-    
-    # Проверяем, является ли сообщение ссылкой Instagram
-    if not any(domain in message.lower() for domain in ["instagram.com", "instagr.am"]):
-        await update.message.reply_text(
-            "❌ Пожалуйста, отправь корректную ссылку на Instagram пост или reel."
-        )
-        return
-    
-    # Отправляем сообщение о начале обработки
-    processing_msg = await update.message.reply_text("⏳ Обрабатываю ссылку...")
-    
     try:
-        # Скачиваем видео
-        video_data, title = downloader.download_video(message)
-        
-        if video_data and title:
-            # Удаляем сообщение об обработке
-            await processing_msg.delete()
-            
-            # Проверяем размер файла (Telegram лимит 50MB)
-            if len(video_data) > 50 * 1024 * 1024:
-                await update.message.reply_text("❌ Файл слишком большой (>50MB)")
-                return
-            
-            # Отправляем видео
-            await update.message.reply_video(
-                video=video_data,
-                caption=f"📹 {title[:100]}..." if len(title) > 100 else f"📹 {title}",
-                filename=f"{title[:50]}.mp4"
-            )
-            
-            # Удаляем исходное сообщение со ссылкой
-            try:
-                await update.message.delete()
-            except Exception as e:
-                logger.warning(f"Не удалось удалить сообщение: {e}")
-                
+        video_url = download_instagram_video(url)
+        if video_url:
+            await context.bot.send_video(chat_id=chat_id, video=video_url)
         else:
-            await processing_msg.edit_text(
-                "❌ Не удалось скачать видео. Возможные причины:\n"
-                "• Пост приватный\n"
-                "• Неверная ссылка\n"
-                "• Временная недоступность Instagram"
-            )
-            
+            await context.bot.send_message(chat_id=chat_id, text="⚠️ Не удалось получить видео.")
     except Exception as e:
-        logger.error(f"Ошибка при обработке сообщения: {e}")
-        await processing_msg.edit_text("❌ Произошла ошибка при скачивании видео.")
+        logger.error(f"Ошибка при скачивании: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="❌ Произошла ошибка при обработке ссылки.")
+    finally:
+        await msg.delete()
 
-# Flask маршруты
-@app.route("/", methods=["GET"])
-def health_check():
-    return jsonify({
-        "status": "alive",
-        "timestamp": time.time(),
-        "bot_status": "active" if telegram_app else "inactive"
-    })
-
-@app.route(f"/{TOKEN}", methods=["POST"])
+# Роут для Telegram Webhook
+@app.post(WEBHOOK_PATH)
 def webhook():
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, telegram_app.bot)
-        
-        # Запускаем обработку в отдельном потоке
-        def process_update():
-            asyncio.run(telegram_app.process_update(update))
-        
-        threading.Thread(target=process_update, daemon=True).start()
-        
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return "ERROR", 500
+    update = Update.de_json(request.get_json(force=True), bot)
+    asyncio.run(application.process_update(update))
+    return "OK"
 
-# Keep-alive функционал
-def keep_alive():
-    """Функция для поддержания активности на Render"""
-    while True:
-        try:
-            time.sleep(25 * 60)  # 25 минут
-            # Делаем запрос к самому себе
-            with httpx.Client(timeout=30) as client:
-                response = client.get(f"https://telegram-instabot-vhl4.onrender.com/")
-                logger.info(f"Keep-alive ping: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Keep-alive error: {e}")
-
-async def setup_telegram():
-    """Настройка Telegram бота"""
-    global telegram_app
-    
-    # Создаем приложение
-    telegram_app = Application.builder().token(TOKEN).build()
-    
-    # Регистрируем хендлеры
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    # Инициализируем приложение
-    await telegram_app.initialize()
-    
-    # Устанавливаем вебхук
-    async with httpx.AsyncClient(timeout=30) as client:
-        webhook_url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
-        response = await client.post(webhook_url, data={"url": WEBHOOK_URL})
-        
-        if response.status_code == 200:
-            logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}")
-        else:
-            logger.error(f"❌ Ошибка установки вебхука: {response.text}")
-            raise Exception("Не удалось установить вебхук")
-    
-    logger.info("🤖 Telegram бот настроен и готов к работе")
-
-def run_telegram_setup():
-    """Запуск настройки Telegram в отдельном потоке"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(setup_telegram())
-
+# Установка Webhook и запуск Flask
 if __name__ == "__main__":
-    try:
-        # Запуск настройки Telegram в отдельном потоке
-        telegram_thread = threading.Thread(target=run_telegram_setup, daemon=True)
-        telegram_thread.start()
-        
-        # Даем время на инициализацию
-        time.sleep(5)
-        
-        # Запуск keep-alive в отдельном потоке
-        keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
-        keep_alive_thread.start()
-        
-        logger.info(f"🚀 Запуск Flask сервера на порту {PORT}")
-        
-        # Запуск Flask сервера
-        app.run(
-            host="0.0.0.0", 
-            port=PORT, 
-            debug=False,
-            threaded=True
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
-        raise
+    async def setup():
+        await application.initialize()
+        await application.start()
+        await bot.set_webhook(f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+        logger.info(f"✅ Вебхук установлен: {WEBHOOK_URL}{WEBHOOK_PATH}")
+        logger.info("🤖 Telegram бот настроен и готов к работе")
+
+    asyncio.run(setup())
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    PORT = int(os.environ.get("PORT", 10000))
+    logger.info(f"🚀 Запуск Flask сервера на порту {PORT}")
+    app.run(host="0.0.0.0", port=PORT)
