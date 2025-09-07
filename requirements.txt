@@ -1,0 +1,5 @@
+python-telegram-bot==20.8
+instaloader
+requests==2.31.0
+certifi
+flask==2.3.3
