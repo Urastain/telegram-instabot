@@ -1,6 +1,7 @@
 services:
   - type: worker
-    name: instagram-bot
+    name: telegram-instabot
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
