@@ -23,7 +23,7 @@ if not TOKEN:
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
-# Flask-сервер для Render (чтобы сервис был "живой")
+# Flask-сервер для Render
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
