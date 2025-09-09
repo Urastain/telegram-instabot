@@ -2,7 +2,9 @@ import os
 import re
 import logging
 import asyncio
+import threading
 import requests
+from flask import Flask
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from playwright.async_api import async_playwright
@@ -20,6 +22,17 @@ if not TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN не найден в переменных окружения Render")
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+# Flask-сервер для Render (чтобы сервис был "живой")
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot is running on Render free tier!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host='0.0.0.0', port=port)
 
 # Класс для скачивания видео
 class InstagramDownloaderPlaywright:
@@ -111,12 +124,13 @@ async def handle_instagram_link(update: Update, context: ContextTypes.DEFAULT_TY
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
-def main():
+def run_bot():
     app = Application.builder().token(TOKEN).build()
     filters_combined = filters.TEXT & filters.Regex(r"^https?://(www\.)?instagram\.com/(p|reel)/[a-zA-Z0-9_-]+")
     app.add_handler(MessageHandler(filters_combined, handle_instagram_link))
-    logger.info("🤖 Бот запущен на Render (Background Worker)")
+    logger.info("🤖 Бот запущен на Render (Web Service)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=run_flask).start()
+    run_bot()
